@@ -1,0 +1,32 @@
+# Dependencias
+node_modules/
+
+# Build de Vite
+dist/
+.next/
+.env.local
+*.tsbuildinfo
+
+# Cobertura y artefactos de pruebas
+coverage/
+.vitest/
+
+# Variables de entorno locales
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Archivos del sistema y del editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json

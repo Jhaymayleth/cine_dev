@@ -1,0 +1,11 @@
+import type { Request } from 'express'
+
+export type AuthenticatedRequest = Request & {
+  user?: { id: string; email: string; role: string }
+}
+
+export type ApiErrorBody = {
+  message: string
+  code: string
+  details?: unknown
+}
