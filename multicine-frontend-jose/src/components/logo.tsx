@@ -28,7 +28,7 @@ function Logo({ className, showText = true }: LogoProps) {
         "
       >
         <img
-          src="/images/logo-Photoroom.png"
+          src="/images/favicon-multicine.png"
           alt="Logo Multicine"
           className="size-full object-contain"
         />

@@ -23,7 +23,7 @@ export default function SelectLocationPage() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-background text-foreground p-6">
       <div className="w-full max-w-lg rounded-lg bg-popover p-6 shadow">
-        <img src="/images/logo-Photoroom.png" alt="Logo" className="mx-auto mb-2 h-50 w-auto" />
+        <img src="/images/favicon-multicine.png" alt="Logo" className="mx-auto mb-2 h-50 w-auto" />
         <h1 className="mb-2 text-2xl font-semibold text-center">Selecciona tu ubicación</h1>
         <p className="mb-4 text-sm text-muted-foreground">Selecciona:  país, ciudad y sede.</p>
 
