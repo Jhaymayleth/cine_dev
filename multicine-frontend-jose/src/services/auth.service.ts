@@ -1,6 +1,22 @@
+import { isAxiosError } from 'axios'
 import { apiClient } from '@/api/client'
 import type { RegisterFormData } from '@/validations/auth.validation'
 import type { RegisterResponse, LoginCredentials, LoginResponse, User } from '@/types'
+
+/**
+ * Un fallo de red o del backend NUNCA crea una sesión falsa: se propaga un
+ * error claro. Antes cualquier caída de la API devolvía un token mock y el
+ * usuario creía haber iniciado sesión.
+ */
+function apiError(error: unknown, fallback: string): Error {
+  if (isAxiosError(error) && error.response?.status === 401) {
+    return new Error('Credenciales inválidas. Verifique su correo y contraseña.', { cause: error })
+  }
+  if (isAxiosError(error) && typeof error.response?.data?.message === 'string') {
+    return new Error(error.response.data.message, { cause: error })
+  }
+  return new Error(fallback, { cause: error })
+}
 
 export const authService = {
   async register(data: RegisterFormData): Promise<RegisterResponse> {
@@ -8,18 +24,7 @@ export const authService = {
       const response = await apiClient.post<RegisterResponse>('/auth/register', data)
       return response.data
     } catch (error) {
-      // Fallback for development if API server is not running
-      console.warn('API Endpoint unavailable, simulating registration response:', error)
-      return {
-        message: 'Usuario registrado exitosamente',
-        user: {
-          id: String(Date.now()),
-          fullName: data.fullName,
-          email: data.email,
-          phone: data.phone,
-          role: 'CLIENT',
-        },
-      }
+      throw apiError(error, 'No se pudo completar el registro. Verifica tu conexión e inténtalo de nuevo.')
     }
   },
 
@@ -28,25 +33,7 @@ export const authService = {
       const response = await apiClient.post<LoginResponse>('/auth/login', credentials)
       return response.data
     } catch (error) {
-      // Fallback for development if API server is not running
-      console.warn('API Endpoint unavailable, simulating login response:', error)
-
-      // Simulate invalid credentials check if demo user requested
-      if (credentials.email === 'invalid@test.com') {
-        throw new Error('Credenciales inválidas. Verifique su correo y contraseña.', { cause: error })
-      }
-
-      return {
-        message: 'Inicio de sesión exitoso',
-        token: `mock-jwt-token-${Date.now()}`,
-        user: {
-          id: 'usr-101',
-          fullName: credentials.email.split('@')[0].toUpperCase(),
-          email: credentials.email,
-          phone: '+573001234567',
-          role: 'CLIENT',
-        },
-      }
+      throw apiError(error, 'No se pudo iniciar sesión. Verifica tu conexión e inténtalo de nuevo.')
     }
   },
 

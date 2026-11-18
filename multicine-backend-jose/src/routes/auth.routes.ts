@@ -1,5 +1,6 @@
 import { Router } from 'express'
 import bcrypt from 'bcrypt'
+import { env } from '../config/env.js'
 import { User } from '../models/index.js'
 import { authMiddleware, type AuthenticatedRequest } from '../middlewares/auth.middleware.js'
 import { generateToken } from '../utils/jwt.js'
@@ -7,7 +8,7 @@ import { generateToken } from '../utils/jwt.js'
 export const authRouter = Router()
 
 const publicUser = (user: any) => ({ id: String(user.id), fullName: user.fullName, email: user.email, phone: user.phone, role: user.role })
-const setAccessCookie = (response: any, token: string) => response.cookie('accessToken', token, { httpOnly: true, sameSite: 'lax', secure: false, maxAge: 15 * 60 * 1000 })
+const setAccessCookie = (response: any, token: string) => response.cookie('accessToken', token, { httpOnly: true, sameSite: 'lax', secure: env.nodeEnv === 'production', maxAge: 15 * 60 * 1000 })
 
  authRouter.post('/register', async (request, response) => {
   try {
@@ -43,8 +44,15 @@ authRouter.get('/profile', authMiddleware, async (request: AuthenticatedRequest,
   return response.json(publicUser(user))
 })
 
-authRouter.post('/refresh', authMiddleware, (request: AuthenticatedRequest, response) => {
-  const token = generateToken(request.user ?? {})
+authRouter.post('/refresh', authMiddleware, async (request: AuthenticatedRequest, response) => {
+  // Revalidar contra la BD: antes se reemitía el token desde el payload, así
+  // que un usuario borrado o con el rol cambiado seguía renovando sesión.
+  const user: any = await User.findByPk(Number(request.user?.userId))
+  if (!user) {
+    response.clearCookie('accessToken')
+    return response.status(401).json({ message: 'Sesion no valida' })
+  }
+  const token = generateToken({ userId: String(user.id), email: user.email, role: user.role })
   setAccessCookie(response, token)
   return response.json({ token })
 })
