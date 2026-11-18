@@ -1,5 +1,5 @@
 import { apiClient } from '@/api'
-import type { MovieFunction, Seat, SeatLock, Cart, CartSnack, Snack, Order, Payment, Ticket, Promotion, GiftCard } from '@/types'
+import type { MovieFunction, Seat, SeatLock, Cart, CartSnack, Snack, Order, Payment, Ticket, Promotion } from '@/types'
 
 export const bookingApi = {
   getFunction: async (movieId: string): Promise<MovieFunction[]> => {
@@ -101,15 +101,5 @@ export const bookingApi = {
   getPromotions: async (): Promise<Promotion[]> => {
     const response = await apiClient.get<Promotion[]>('/promotions')
     return response.data
-  },
-
-  getGiftCards: async (): Promise<GiftCard[]> => {
-    const response = await apiClient.get<GiftCard[]>('/giftCards')
-    return response.data
-  },
-
-  validateGiftCard: async (code: string): Promise<GiftCard | null> => {
-    const response = await apiClient.get<GiftCard[]>(`/giftCards?code=${code}&active=true`)
-    return response.data[0] || null
   },
 }

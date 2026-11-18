@@ -80,22 +80,6 @@ export interface MovieFunction {
   status: string
 }
 
-export interface DomainUser {
-  id: string
-  email: string
-  password: string
-  name: string
-  role: string
-}
-
-export interface Membership {
-  id: string
-  userId: string
-  type: string
-  points: number
-  expiresAt: string
-}
-
 export interface Cart {
   id: string
   userId: string
@@ -164,13 +148,5 @@ export interface Promotion {
   code: string
   validFrom: string
   validTo: string
-  active: boolean
-}
-
-export interface GiftCard {
-  id: string
-  code: string
-  balance: number
-  expiresAt: string
   active: boolean
 }

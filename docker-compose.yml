@@ -1,0 +1,55 @@
+# Levanta el stack completo: Postgres + API + frontend.
+#   docker compose up --build
+# Frontend en http://localhost:8080, API en http://localhost:3000 y la
+# documentación navegable en http://localhost:3000/api/docs.
+services:
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-multicine}
+      POSTGRES_USER: ${POSTGRES_USER:-multicine}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-multicine-local-password}
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-multicine} -d ${POSTGRES_DB:-multicine}"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - multicine_db_data:/var/lib/postgresql/data
+
+  backend:
+    build: ./multicine-backend-jose
+    environment:
+      NODE_ENV: production
+      APP_PORT: 3000
+      # Dentro de la red de Compose la base se llama `db` y escucha en 5432.
+      POSTGRES_HOST: db
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-multicine}
+      POSTGRES_USER: ${POSTGRES_USER:-multicine}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-multicine-local-password}
+      JWT_SECRET: ${JWT_SECRET:-local-compose-secret-change-me}
+      JWT_EXPIRES_IN: 15m
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:8080}
+    ports:
+      - "3000:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./multicine-frontend-jose
+      args:
+        # Se inlinea en el bundle: el navegador llama al API publicado en 3000.
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3000}
+        NEXT_PUBLIC_API_TIMEOUT: ${NEXT_PUBLIC_API_TIMEOUT:-10000}
+    ports:
+      - "8080:3000"
+    depends_on:
+      - backend
+
+volumes:
+  multicine_db_data:

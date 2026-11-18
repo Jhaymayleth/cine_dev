@@ -156,6 +156,32 @@ Backend Express 4
 | Limpieza de código muerto, documentación y migración completa a App Router/SSR | Sin módulos vacíos, README único y coherente, metadatos/SEO renderizados en servidor |
 | Observabilidad, rate limiting, Helmet y auditoría de dependencias | Logs estructurados, límites activos y escaneo sin vulnerabilidades críticas |
 
-## 11. Conclusión
+## 11. Estado posterior (2026-11-18, misma fecha)
+
+Esta sección registra lo corregido después de la revisión inicial; los números de arriba describen el estado en `ff991cf`.
+
+| Área | Cambio | Verificación |
+|---|---|---|
+| B-01 login simulado | Eliminado el token falso; un fallo de API deja el login en error | `src/tests/store/useAuthStore.test.ts` (caso de credenciales rechazadas) |
+| B-02 integridad financiera | `POST /checkout` calcula la orden y sus precios desde `CinemaFunction.basePrice`; `POST /orders/:orderId/tickets` toma asientos de `OrderSeat`; el pago nace `PENDING` | E2E `tests/e2e/checkout.e2e.mjs` |
+| B-03 IDOR | `userId` sale solo del token en seatLocks, carts, cartSnacks, tickets, orders y payments; `Cart.update(request.body)` sustituido por 400 | E2E (otro usuario recibe 404 en `/tickets`) |
+| B-04 errores async | `errorHandler`/`notFoundHandler` registrados y handlers envueltos en `asyncHandler` | `tsc --noEmit` y respuestas 400/404 JSON del E2E |
+| B-05 carrera de asientos | Bloqueo en transacción con `LOCK.UPDATE`, índice único en `OrderSeat` y verificación de ticket vendido | E2E (checkout sin bloqueo responde 409) |
+| B-06 Docker frontend | Dockerfile usa la salida `standalone` de Next; `nginx.conf` inválido eliminado | `docker compose up --build` levanta frontend en 8080 (HTTP 200) |
+| B-12 endpoints muertos | Retirados los clientes sin backend (`/departments`, `/rooms`, `/users`, `/memberships`, `/giftCards`); OpenAPI lista solo rutas reales y se sirve Swagger UI en `/api/docs` | `src/docs/openapi.ts`, `src/app.ts` |
+| RF-05/RF-06 | El detalle usa funciones reales del backend y mapa de asientos con estado real | `Details.tsx`, `SeatMap.tsx` |
+| RF-10/RF-11 | Checkout, historial y tickets con QR desde el detalle | E2E (18 aserciones) |
+| CI y tests | Vitest en ambos proyectos (`npm test`) y workflow `.github/workflows/ci.yml` (typecheck, tests, build), aún **sin versionar**: el token de push no tiene el scope `workflow` | `npm test` local: 8 + 11 pruebas verdes |
+| Compose | `docker-compose.yml` raíz con Postgres, API y frontend | `docker compose up -d --build` y `curl /health` → 200 |
+
+**Sigue pendiente:**
+
+- Migraciones versionadas y retiro de `sequelize.sync()`/seed de arranque (requiere decidir el flujo de BD).
+- Webhook firmado del proveedor de pagos y QR escaneable (no hay credenciales de proveedor).
+- Endurecer cookies/CORS por entorno y rate limiting/Helmet.
+- `npm run lint` en el frontend falla con 51 errores previos (reglas `react-hooks/set-state-in-effect` y variables sin uso); por eso el CI no incluye lint todavía.
+- Membresías, notificaciones y panel admin (stubs, P2).
+
+## 12. Conclusión
 
 `cine_dev` es una **copia de portafolio parcial**, no un sistema full stack terminado: la parte visual de descubrimiento está avanzada y el backend tiene una base razonable de Express/Sequelize, pero la compra de entradas existe solo como maqueta y los endpoints sensibles no son seguros. Antes de presentarlo como “plataforma de reservas” deben cerrarse los P0 y, como mínimo, los P1 de Docker, entorno y contrato API. La evidencia de esta auditoría es estática y verificable en las rutas y líneas citadas; no se ejecutaron instalaciones ni builds por restricción del encargo.
