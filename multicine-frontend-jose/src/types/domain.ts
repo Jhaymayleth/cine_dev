@@ -130,7 +130,7 @@ export interface CartSnack {
 export interface Order {
   id: string
   userId: string
-  cartId: string
+  cartId?: string
   total: number
   status: string
   createdAt: string

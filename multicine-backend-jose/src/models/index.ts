@@ -108,6 +108,22 @@ export const Order = sequelize.define('Order', {
   status: { type: DataTypes.STRING, allowNull: false, defaultValue: 'PENDING' },
 }, { tableName: 'orders', timestamps: true })
 
+/**
+ * Asientos comprados en una orden. Se guardan con el precio del momento para
+ * que la emisión de tickets no dependa de lo que mande el cliente.
+ */
+export const OrderSeat = sequelize.define('OrderSeat', {
+  id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
+  orderId: { type: DataTypes.INTEGER, allowNull: false },
+  functionId: { type: DataTypes.INTEGER, allowNull: false },
+  seatId: { type: DataTypes.INTEGER, allowNull: false },
+  unitPrice: { type: DataTypes.DECIMAL(10, 2), allowNull: false },
+}, {
+  tableName: 'order_seats',
+  timestamps: false,
+  indexes: [{ unique: true, fields: ['orderId', 'functionId', 'seatId'] }],
+})
+
 export const Payment = sequelize.define('Payment', {
   id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
   orderId: { type: DataTypes.INTEGER, allowNull: false },
@@ -154,4 +170,9 @@ export const initModels = (): void => {
   CartSnack.belongsTo(Snack, { foreignKey: 'snackId', as: 'snack' })
   Order.hasMany(Ticket, { foreignKey: 'orderId', as: 'tickets' })
   Ticket.belongsTo(Order, { foreignKey: 'orderId', as: 'order' })
+  Order.hasMany(OrderSeat, { foreignKey: 'orderId', as: 'orderSeats' })
+  OrderSeat.belongsTo(Order, { foreignKey: 'orderId', as: 'order' })
+  OrderSeat.belongsTo(CinemaFunction, { foreignKey: 'functionId', as: 'function' })
+  OrderSeat.belongsTo(Seat, { foreignKey: 'seatId', as: 'seat' })
+  Payment.belongsTo(Order, { foreignKey: 'orderId', as: 'order' })
 }

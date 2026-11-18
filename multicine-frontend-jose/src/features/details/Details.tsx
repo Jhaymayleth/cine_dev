@@ -17,6 +17,8 @@ import type { Movie } from '@/features/movies'
 import type { MovieFunction } from '@/types'
 import { featuredMovies } from '@/features/movies/types/movies.types'
 import { SeatMap } from '@/features/reservations'
+import { bookingApi } from '@/features/reservations/api'
+import type { Order, Payment, Ticket as TicketRecord } from '@/types'
 
 import Footer from '../landing/components/Footer'
 import Navbar from '../landing/components/Navbar'
@@ -78,7 +80,13 @@ const Details = () => {
   const [selectedRoom, setSelectedRoom] = useState('')
   const [selectedFunctionId, setSelectedFunctionId] = useState('')
   const [selectedSeatIds, setSelectedSeatIds] = useState<string[]>([])
-  const [confirmed, setConfirmed] = useState(false)
+  const [checkout, setCheckout] = useState<{
+    order: Order
+    payment: Payment
+    tickets: TicketRecord[]
+  } | null>(null)
+  const [isCheckingOut, setIsCheckingOut] = useState(false)
+  const [checkoutError, setCheckoutError] = useState<string | null>(null)
 
   const handleBack = () => {
     if (location.key !== 'default') {
@@ -235,7 +243,8 @@ const Details = () => {
 
   useEffect(() => {
     setSelectedSeatIds([])
-    setConfirmed(false)
+    setCheckout(null)
+    setCheckoutError(null)
   }, [selectedFunctionId])
 
   const scrollToShowtimes = () => {
@@ -245,13 +254,34 @@ const Details = () => {
     })
   }
 
-  const handleContinue = () => {
-    if (!isSelectionComplete || selectedSeatIds.length === 0) {
-      return
-    }
+  const handleContinue = async () => {
+    if (!selectedFunction || selectedSeatIds.length === 0 || isCheckingOut) return
 
-    setConfirmed(true)
+    setIsCheckingOut(true)
+    setCheckoutError(null)
+    try {
+      // checkout -> orden; pago -> PENDING; tickets -> QR. Cada paso valida
+      // en el backend que los asientos sigan bloqueados por este usuario.
+      const order = await bookingApi.checkoutFromSeats(
+        selectedSeatIds.map((seatId) => ({ functionId: selectedFunction.id, seatId })),
+      )
+      const payment = await bookingApi.createPendingPayment(order.id)
+      const tickets = await bookingApi.issueTicketsForOrder(order.id)
+      setCheckout({ order, payment, tickets })
+    } catch (error) {
+      setCheckoutError(
+        error instanceof Error ? error.message : 'No se pudo completar la compra',
+      )
+    } finally {
+      setIsCheckingOut(false)
+    }
   }
+
+  const currency = new Intl.NumberFormat('es-CO', {
+    style: 'currency',
+    currency: 'COP',
+    maximumFractionDigits: 0,
+  })
 
   if (isLoading) {
     return <MovieDetailSkeleton />
@@ -752,7 +782,7 @@ const Details = () => {
             <Button
               type="button"
               onClick={handleContinue}
-              disabled={!isSelectionComplete || selectedSeatIds.length === 0}
+              disabled={!isSelectionComplete || selectedSeatIds.length === 0 || !!checkout}
               className="
                 h-12
                 rounded-xl
@@ -769,12 +799,19 @@ const Details = () => {
                 disabled:cursor-not-allowed disabled:opacity-40
               "
             >
-              {confirmed ? 'Asientos bloqueados' : 'Continuar'}
+              {isCheckingOut
+                ? 'Procesando...'
+                : checkout
+                  ? 'Compra registrada'
+                  : 'Confirmar y comprar'}
             </Button>
             {isSelectionComplete && selectedSeatIds.length === 0 && (
               <p className="text-xs text-[#7d5d62]">
                 Elige al menos un asiento en el mapa para continuar.
               </p>
+            )}
+            {checkoutError && (
+              <p className="text-xs font-medium text-[#a01030]">{checkoutError}</p>
             )}
           </div>
         </div>
@@ -803,6 +840,40 @@ const Details = () => {
               selectedSeatIds={selectedSeatIds}
               onChange={setSelectedSeatIds}
             />
+          </div>
+        </section>
+      )}
+
+      {checkout && (
+        <section className="relative mx-auto max-w-7xl px-4 pb-4 pt-2 sm:px-6 lg:px-8">
+          <div className="rounded-[30px] border border-[#cbe6d5] bg-[#f4fbf6] p-4 shadow-[0_10px_30px_rgba(35,20,22,0.08)] sm:p-6">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h2 className="font-heading text-xl font-bold tracking-tight text-[#1f4630]">
+                Compra registrada
+              </h2>
+              <p className="text-sm font-semibold text-[#1f4630]">
+                Orden #{checkout.order.id} · {currency.format(Number(checkout.order.total))}
+              </p>
+            </div>
+            <p className="mt-2 text-sm text-[#3f5f4c]">
+              El pago quedó <strong>{checkout.payment.status}</strong>. Tus tickets se
+              activan cuando el proveedor de pago confirme el cobro; guarda los códigos.
+            </p>
+            <ul className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {checkout.tickets.map((ticket) => (
+                <li
+                  key={ticket.id}
+                  className="rounded-xl border border-[#d7e9dd] bg-white px-3 py-2 text-sm"
+                >
+                  <p className="font-semibold text-[#1f4630]">
+                    Ticket #{ticket.id} · {currency.format(Number(ticket.price))}
+                  </p>
+                  <p className="mt-1 break-all font-mono text-xs text-[#5b7366]">
+                    {ticket.qrCode}
+                  </p>
+                </li>
+              ))}
+            </ul>
           </div>
         </section>
       )}

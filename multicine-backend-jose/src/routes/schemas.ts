@@ -54,10 +54,17 @@ export const orderSchema = z.object({
     .max(MAX_SNACK_QUANTITY, 'Demasiados productos en la orden'),
 })
 
-const ticketItemSchema = z.object({
-  orderId: id,
+const checkoutSeatSchema = z.object({
   functionId: id,
   seatId: id,
+})
+
+/** La orden de compra se arma con asientos ya bloqueados; el precio no viaja. */
+export const checkoutSchema = z.object({
+  seats: z
+    .array(checkoutSeatSchema)
+    .min(1, 'La compra necesita al menos un asiento')
+    .max(MAX_TICKETS_PER_ORDER, `Se permiten maximo ${MAX_TICKETS_PER_ORDER} asientos`),
 })
 
 export const paymentSchema = z.object({
@@ -65,11 +72,3 @@ export const paymentSchema = z.object({
   method: z.enum(['CARD', 'CASH', 'PSE']).default('CARD'),
 })
 
-// Acepta tanto un ticket suelto como una lista (contrato histórico del API).
-export const ticketsSchema = z.preprocess(
-  (value) => (Array.isArray(value) ? value : [value]),
-  z
-    .array(ticketItemSchema)
-    .min(1, 'Se necesita al menos un ticket')
-    .max(MAX_TICKETS_PER_ORDER, `Se permiten maximo ${MAX_TICKETS_PER_ORDER} tickets`),
-)

@@ -13,7 +13,9 @@ export const openapi = {
     '/api/seats': { get: { summary: 'Listar asientos de una funcion' } },
     '/api/seatLocks': { post: { summary: 'Bloquear asiento' } },
     '/api/orders': { post: { summary: 'Crear orden' }, get: { summary: 'Historial de ordenes' } },
+    '/api/checkout': { post: { summary: 'Crear orden desde asientos bloqueados' } },
     '/api/payments': { post: { summary: 'Registrar pago' } },
-    '/api/tickets': { get: { summary: 'Consultar tickets' }, post: { summary: 'Emitir tickets' } },
+    '/api/orders/{orderId}/tickets': { post: { summary: 'Emitir tickets de una orden' } },
+    '/api/tickets': { get: { summary: 'Consultar tickets' } },
   },
 } as const

@@ -76,8 +76,20 @@ export const bookingApi = {
     return response.data
   },
 
-  createTickets: async (tickets: Omit<Ticket, 'id'>[]): Promise<Ticket[]> => {
-    const response = await apiClient.post<Ticket[]>('/tickets', tickets)
+  // Convierte los asientos que el usuario ya bloqueó en una orden PENDING.
+  checkoutFromSeats: async (seats: { functionId: string; seatId: string }[]): Promise<Order> => {
+    const response = await apiClient.post<Order>('/checkout', { seats })
+    return response.data
+  },
+
+  // El backend toma el monto de la orden; solo se elige el medio de pago.
+  createPendingPayment: async (orderId: string, method = 'CARD'): Promise<Payment> => {
+    const response = await apiClient.post<Payment>('/payments', { orderId, method })
+    return response.data
+  },
+
+  issueTicketsForOrder: async (orderId: string): Promise<Ticket[]> => {
+    const response = await apiClient.post<Ticket[]>(`/orders/${orderId}/tickets`, {})
     return response.data
   },
 

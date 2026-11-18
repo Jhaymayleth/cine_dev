@@ -6,6 +6,7 @@ import {
   CartSnack,
   CinemaFunction,
   Order,
+  OrderSeat,
   Payment,
   Seat,
   SeatLock,
@@ -17,7 +18,7 @@ import { asyncHandler } from '../core/http/async-handler.js'
 import { validateBody } from '../core/http/validate.middleware.js'
 import { authMiddleware, type AuthenticatedRequest } from '../middlewares/auth.middleware.js'
 import { seatsWithState } from '../shared/utils/seat-availability.js'
-import { cartSnackSchema, orderSchema, paymentSchema, seatLockSchema, ticketsSchema } from './schemas.js'
+import { cartSnackSchema, checkoutSchema, orderSchema, paymentSchema, seatLockSchema } from './schemas.js'
 
 export const bookingRouter = Router()
 
@@ -258,6 +259,111 @@ bookingRouter.get(
 )
 
 /**
+ * Checkout: convierte asientos ya bloqueados por el usuario en una orden.
+ * Exige bloqueo vigente y propio, valida función/asiento contra la BD y
+ * calcula el total con el precio de la función. El cliente no manda precios.
+ */
+bookingRouter.post(
+  '/checkout',
+  authMiddleware,
+  validateBody(checkoutSchema),
+  asyncHandler(async (request: AuthenticatedRequest, response) => {
+    const userId = userIdOf(request)
+    if (!userId) return response.status(401).json({ message: 'No autenticado' })
+
+    const uniqueSeats = new Map<string, { functionId: number; seatId: number }>()
+    for (const item of request.body.seats) {
+      uniqueSeats.set(`${item.functionId}:${item.seatId}`, item)
+    }
+    const wanted = [...uniqueSeats.values()]
+
+    const result = await sequelize.transaction(async (transaction) => {
+      const functionIds = [...new Set(wanted.map((item) => item.functionId))]
+      const seatIds = [...new Set(wanted.map((item) => item.seatId))]
+
+      const functions = await CinemaFunction.findAll({
+        where: {
+          id: { [Op.in]: functionIds },
+          status: 'ACTIVE',
+          startsAt: { [Op.gt]: new Date() },
+        },
+        transaction,
+      })
+      const priceByFunction = new Map(
+        functions.map((item: any) => [Number(item.id), Number(item.basePrice)]),
+      )
+      if (functions.length !== functionIds.length) return 'function' as const
+
+      const seats = await Seat.findAll({
+        where: { id: { [Op.in]: seatIds } },
+        transaction,
+      })
+      const seatById = new Map(seats.map((seat: any) => [Number(seat.id), seat]))
+      if (
+        wanted.some(
+          (item) =>
+            !seatById.has(item.seatId) ||
+            Number(seatById.get(item.seatId)?.get('functionId')) !== item.functionId,
+        )
+      ) {
+        return 'seat' as const
+      }
+
+      const sold = await Ticket.findOne({
+        where: {
+          functionId: { [Op.in]: functionIds },
+          seatId: { [Op.in]: seatIds },
+          status: { [Op.ne]: 'CANCELLED' },
+        },
+        transaction,
+      })
+      if (sold) return 'sold' as const
+
+      // El bloqueo es la reserva temporal: sin él, otro usuario podría haber
+      // tomado el asiento mientras se armaba la orden.
+      const locks = await SeatLock.findAll({
+        where: {
+          userId,
+          functionId: { [Op.in]: functionIds },
+          seatId: { [Op.in]: seatIds },
+          expiresAt: { [Op.gt]: new Date() },
+        },
+        transaction,
+        lock: transaction.LOCK.UPDATE,
+      })
+      const lockedByUser = new Set(
+        locks.map((lock: any) => `${Number(lock.functionId)}:${Number(lock.seatId)}`),
+      )
+      if (wanted.some((item) => !lockedByUser.has(`${item.functionId}:${item.seatId}`))) {
+        return 'lock' as const
+      }
+
+      const total = wanted.reduce(
+        (sum, item) => sum + (priceByFunction.get(item.functionId) ?? 0),
+        0,
+      )
+      const order = await Order.create({ userId, total, status: 'PENDING' }, { transaction })
+      await OrderSeat.bulkCreate(
+        wanted.map((item) => ({
+          orderId: order.get('id'),
+          functionId: item.functionId,
+          seatId: item.seatId,
+          unitPrice: priceByFunction.get(item.functionId),
+        })),
+        { transaction },
+      )
+      return order
+    })
+
+    if (result === 'function') return response.status(409).json({ message: 'La funcion ya no esta disponible' })
+    if (result === 'seat') return badRequest(response, 'Uno de los asientos no pertenece a esa funcion')
+    if (result === 'sold') return response.status(409).json({ message: 'Uno de los asientos ya tiene ticket' })
+    if (result === 'lock') return response.status(409).json({ message: 'Uno de los asientos ya no esta bloqueado por ti' })
+    return response.status(201).json(result)
+  }),
+)
+
+/**
  * Registra la intención de pago. Nace PENDING y el monto sale de la orden;
  * solo el proveedor (webhook) puede pasarla a APPROVED.
  */
@@ -276,6 +382,10 @@ bookingRouter.post(
     const order = await Order.findOne({ where: { id: orderId, userId } })
     if (!order) return response.status(404).json({ message: 'Orden no encontrada' })
 
+    // Idempotente: reintentar el pago no crea cobros duplicados.
+    const existing = await Payment.findOne({ where: { orderId } })
+    if (existing) return response.status(200).json(existing)
+
     const payment = await Payment.create({
       orderId,
       amount: order.get('total'),
@@ -288,86 +398,81 @@ bookingRouter.post(
 )
 
 /**
- * Emite tickets de una orden propia. Precio y función se validan contra la
- * BD; el cliente no puede inventar precio, asiento ni orden ajena.
+ * Emite los tickets de una orden propia. Los asientos y precios salen de
+ * OrderSeat (no del cliente) y el pago debe estar registrado; quedan PENDING
+ * hasta que el proveedor confirme el cobro.
  */
 bookingRouter.post(
-  '/tickets',
+  '/orders/:orderId/tickets',
   authMiddleware,
-  validateBody(ticketsSchema),
   asyncHandler(async (request: AuthenticatedRequest, response) => {
     const userId = userIdOf(request)
+    const orderId = positiveId(request.params.orderId)
     if (!userId) return response.status(401).json({ message: 'No autenticado' })
+    if (!orderId) return badRequest(response, 'orderId no es valido')
 
-    // El esquema ya normaliza objeto o array a una lista de 1..MAX tickets.
-    const rawItems = request.body as any[]
-    const items = rawItems.map((item: any) => ({
-      orderId: positiveId(item?.orderId),
-      functionId: positiveId(item?.functionId),
-      seatId: positiveId(item?.seatId),
-    }))
-    if (items.some((item: any) => !item.orderId || !item.functionId || !item.seatId)) {
-      return badRequest(response, 'orderId, functionId y seatId son obligatorios')
-    }
+    const result = await sequelize.transaction(async (transaction) => {
+      const order = await Order.findOne({
+        where: { id: orderId, userId },
+        transaction,
+        lock: transaction.LOCK.UPDATE,
+      })
+      if (!order) return 'order' as const
 
-    const orderIds = [...new Set(items.map((item: any) => item.orderId))] as number[]
-    const ownedOrders = await Order.findAll({ where: { id: { [Op.in]: orderIds }, userId } })
-    if (ownedOrders.length !== orderIds.length) {
-      return response.status(403).json({ message: 'La orden no pertenece al usuario' })
-    }
+      const payment = await Payment.findOne({ where: { orderId }, transaction })
+      if (!payment) return 'payment' as const
 
-    const seatIds = [...new Set(items.map((item: any) => item.seatId))] as number[]
-    const seats = await Seat.findAll({ where: { id: { [Op.in]: seatIds } } })
-    const seatById = new Map(seats.map((seat: any) => [Number(seat.id), seat]))
-    if (items.some((item: any) => seatById.get(item.seatId)?.get('functionId') !== item.functionId)) {
-      return badRequest(response, 'El asiento no pertenece a esa funcion')
-    }
+      const orderSeats = await OrderSeat.findAll({ where: { orderId }, transaction })
+      if (orderSeats.length === 0) return 'empty' as const
 
-    const functions = await CinemaFunction.findAll({
-      where: { id: { [Op.in]: [...new Set(items.map((item: any) => item.functionId))] }, status: 'ACTIVE' },
-    })
-    const functionById = new Map(functions.map((item: any) => [Number(item.id), item]))
-    if (items.some((item: any) => !functionById.has(item.functionId))) {
-      return badRequest(response, 'La funcion no esta disponible')
-    }
+      // Idempotente: si ya se emitieron, se devuelven los existentes.
+      const existing = await Ticket.findAll({ where: { orderId }, transaction })
+      if (existing.length > 0) return existing
 
-    const existing = await Ticket.findOne({
-      where: {
-        functionId: { [Op.in]: items.map((item: any) => item.functionId) },
-        seatId: { [Op.in]: seatIds },
-        status: { [Op.ne]: 'CANCELLED' },
-      },
-    })
-    if (existing) return response.status(409).json({ message: 'Uno de los asientos ya tiene ticket' })
+      const functionIds = [...new Set(orderSeats.map((item: any) => Number(item.functionId)))]
+      const seatIds = [...new Set(orderSeats.map((item: any) => Number(item.seatId)))]
 
-    const tickets = await sequelize.transaction(async (transaction) => {
-      // Revalidar dentro de la transacción cierra la carrera entre dos compras.
-      const duplicated = await Ticket.findOne({
+      const taken = await Ticket.findOne({
         where: {
-          functionId: { [Op.in]: items.map((item: any) => item.functionId) },
+          functionId: { [Op.in]: functionIds },
           seatId: { [Op.in]: seatIds },
           status: { [Op.ne]: 'CANCELLED' },
         },
         transaction,
         lock: transaction.LOCK.UPDATE,
       })
-      if (duplicated) return null
+      if (taken) return 'sold' as const
 
-      return Ticket.bulkCreate(
-        items.map((item: any) => ({
-          orderId: item.orderId,
-          functionId: item.functionId,
-          seatId: item.seatId,
-          price: functionById.get(item.functionId)?.get('basePrice'),
+      const tickets = await Ticket.bulkCreate(
+        orderSeats.map((item: any) => ({
+          orderId,
+          functionId: Number(item.functionId),
+          seatId: Number(item.seatId),
+          price: item.unitPrice,
           qrCode: crypto.randomUUID(),
-          status: 'VALID',
+          status: 'PENDING',
         })),
         { transaction },
       )
+
+      // El ticket ya ocupa el asiento: el bloqueo temporal deja de hacer falta.
+      await SeatLock.destroy({
+        where: {
+          userId,
+          functionId: { [Op.in]: functionIds },
+          seatId: { [Op.in]: seatIds },
+        },
+        transaction,
+      })
+
+      return tickets
     })
 
-    if (!tickets) return response.status(409).json({ message: 'Uno de los asientos ya tiene ticket' })
-    return response.status(201).json(tickets)
+    if (result === 'order') return response.status(404).json({ message: 'Orden no encontrada' })
+    if (result === 'payment') return response.status(409).json({ message: 'Registra el pago antes de emitir los tickets' })
+    if (result === 'empty') return badRequest(response, 'La orden no tiene asientos')
+    if (result === 'sold') return response.status(409).json({ message: 'Uno de los asientos ya tiene ticket' })
+    return response.status(201).json(result)
   }),
 )
 
