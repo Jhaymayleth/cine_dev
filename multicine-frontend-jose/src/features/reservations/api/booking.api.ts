@@ -8,7 +8,7 @@ export const bookingApi = {
   },
 
   getSeatsByFunction: async (functionId: string): Promise<Seat[]> => {
-    const response = await apiClient.get<Seat[]>(`/seats?functionId=${functionId}`)
+    const response = await apiClient.get<Seat[]>(`/functions/${functionId}/seats`)
     return response.data
   },
 
@@ -17,7 +17,8 @@ export const bookingApi = {
     return response.data
   },
 
-  createSeatLock: async (data: { seatId: string; functionId: string; userId: string }): Promise<SeatLock> => {
+  // El dueño del bloqueo sale del token en el backend, no del body.
+  createSeatLock: async (data: { seatId: string; functionId: string }): Promise<SeatLock> => {
     const response = await apiClient.post<SeatLock>('/seatLocks', data)
     return response.data
   },

@@ -16,6 +16,7 @@ import { MovieArtwork, moviesApi } from '@/features/movies'
 import type { Movie } from '@/features/movies'
 import type { MovieFunction } from '@/types'
 import { featuredMovies } from '@/features/movies/types/movies.types'
+import { SeatMap } from '@/features/reservations'
 
 import Footer from '../landing/components/Footer'
 import Navbar from '../landing/components/Navbar'
@@ -76,6 +77,7 @@ const Details = () => {
   const [selectedDateKey, setSelectedDateKey] = useState<string | null>(null)
   const [selectedRoom, setSelectedRoom] = useState('')
   const [selectedFunctionId, setSelectedFunctionId] = useState('')
+  const [selectedSeatIds, setSelectedSeatIds] = useState<string[]>([])
   const [confirmed, setConfirmed] = useState(false)
 
   const handleBack = () => {
@@ -221,11 +223,20 @@ const Details = () => {
     }
   }, [functionOptions, selectedRoom, selectedFunctionId])
 
+  const selectedFunction = functionOptions.find(
+    (item) => item.id === selectedFunctionId,
+  )
+
   const isSelectionComplete =
     !!selectedVenue &&
     !!selectedDateKey &&
     !!selectedRoom &&
     !!selectedFunctionId
+
+  useEffect(() => {
+    setSelectedSeatIds([])
+    setConfirmed(false)
+  }, [selectedFunctionId])
 
   const scrollToShowtimes = () => {
     document.getElementById('showtimes-section')?.scrollIntoView({
@@ -235,7 +246,7 @@ const Details = () => {
   }
 
   const handleContinue = () => {
-    if (!isSelectionComplete) {
+    if (!isSelectionComplete || selectedSeatIds.length === 0) {
       return
     }
 
@@ -737,11 +748,11 @@ const Details = () => {
             </div>
           </div>
 
-          <div className="mt-6 flex items-center justify-end">
+          <div className="mt-6 flex flex-col items-end gap-2">
             <Button
               type="button"
               onClick={handleContinue}
-              disabled={!isSelectionComplete}
+              disabled={!isSelectionComplete || selectedSeatIds.length === 0}
               className="
                 h-12
                 rounded-xl
@@ -758,11 +769,43 @@ const Details = () => {
                 disabled:cursor-not-allowed disabled:opacity-40
               "
             >
-              {confirmed ? 'Función confirmada' : 'Continuar'}
+              {confirmed ? 'Asientos bloqueados' : 'Continuar'}
             </Button>
+            {isSelectionComplete && selectedSeatIds.length === 0 && (
+              <p className="text-xs text-[#7d5d62]">
+                Elige al menos un asiento en el mapa para continuar.
+              </p>
+            )}
           </div>
         </div>
       </section>
+
+      {selectedFunctionId && (
+        <section
+          id="seats-section"
+          className="relative mx-auto max-w-7xl px-4 pb-4 pt-2 sm:px-6 lg:px-8"
+        >
+          <div className="rounded-[30px] border border-[#eadfe1] bg-white p-4 shadow-[0_10px_30px_rgba(35,20,22,0.08)] sm:p-6">
+            <div className="mb-5 flex flex-wrap items-center justify-between gap-2">
+              <h2 className="font-heading text-xl font-bold tracking-tight text-[#2d1d20]">
+                Elige tus asientos
+              </h2>
+              <p className="text-sm text-[#7d5d62]">
+                {selectedVenue} · {selectedRoom}
+                {selectedFunction
+                  ? ` · ${timeLabelOf(selectedFunction.startsAt)}`
+                  : ''}
+              </p>
+            </div>
+
+            <SeatMap
+              functionId={selectedFunctionId}
+              selectedSeatIds={selectedSeatIds}
+              onChange={setSelectedSeatIds}
+            />
+          </div>
+        </section>
+      )}
 
       <section className="relative mx-auto max-w-7xl px-4 pb-16 pt-4 sm:px-6 lg:px-8">
         <div

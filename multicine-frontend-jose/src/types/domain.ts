@@ -35,12 +35,17 @@ export interface Room {
   capacity: number
 }
 
+export type SeatStatus = 'AVAILABLE' | 'LOCKED' | 'OCCUPIED'
+
 export interface Seat {
   id: string
-  roomId: string
+  functionId?: string
+  roomId?: string
   row: string
-  number: string
+  number: number
   seatType: string
+  /** Lo calcula el backend con tickets vendidos y bloqueos vigentes. */
+  status?: SeatStatus
 }
 
 export interface Movie {
