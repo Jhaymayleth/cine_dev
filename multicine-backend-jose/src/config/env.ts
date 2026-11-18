@@ -16,5 +16,6 @@ export const env = {
   postgresPassword: process.env.POSTGRES_PASSWORD ?? 'multicine-local-password',
   jwtSecret: required('JWT_SECRET'),
   jwtExpiresIn: process.env.JWT_EXPIRES_IN ?? '15m',
-  corsOrigin: process.env.CORS_ORIGIN ?? 'http://localhost:3000',
+  // Next corre en 3001 en desarrollo (`next dev -p 3001`); el API ocupa el 3000.
+  corsOrigin: process.env.CORS_ORIGIN ?? 'http://localhost:3001',
 } as const

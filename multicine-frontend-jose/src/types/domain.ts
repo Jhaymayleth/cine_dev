@@ -61,11 +61,17 @@ export interface MovieFunction {
   id: string
   movieId: string
   roomId: string
+  roomName?: string
+  cinemaId?: string
+  cinemaName?: string | null
+  cityName?: string | null
   startsAt: string
   format: string
   language: string
   audioType: string
   basePrice: number
+  availableSeats?: number
+  isSoldOut?: boolean
   status: string
 }
 

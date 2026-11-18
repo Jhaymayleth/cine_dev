@@ -1,4 +1,4 @@
-import { Op } from 'sequelize'
+import { Op, type IncludeOptions } from 'sequelize'
 import { Router } from 'express'
 import { City, Cinema, CinemaFunction, Country, Movie, Promotion, SeatLock } from '../models/index.js'
 import { availabilityFor, seatsWithState } from '../shared/utils/seat-availability.js'
@@ -6,7 +6,30 @@ import { availabilityFor, seatsWithState } from '../shared/utils/seat-availabili
 export const catalogRouter = Router()
 
 const movieView = (movie: any) => ({ id: String(movie.id), title: movie.title, description: movie.synopsis, synopsis: movie.synopsis, genres: movie.genres, duration: `${Math.floor(movie.durationMin / 60)}h ${movie.durationMin % 60}min`, durationMin: movie.durationMin, rating: movie.classification, classification: movie.classification, score: movie.rating, posterUrl: movie.posterUrl, image: movie.posterUrl, trailerUrl: movie.trailerUrl, format: '2D', status: movie.status === 'ACTIVE' ? 'Today' : movie.status })
-const functionView = (item: any, availability?: { availableSeats: number; isSoldOut: boolean }) => ({ id: String(item.id), movieId: String(item.movieId), startsAt: item.startsAt, roomId: String(item.id), roomName: item.roomName, cinemaId: String(item.cinemaId), format: item.format, language: item.language, audioType: item.language, basePrice: Number(item.basePrice), availableSeats: availability?.availableSeats ?? item.capacity, isSoldOut: availability?.isSoldOut ?? false, status: item.status })
+const functionView = (item: any, availability?: { availableSeats: number; isSoldOut: boolean }) => ({
+  id: String(item.id),
+  movieId: String(item.movieId),
+  startsAt: item.startsAt,
+  roomId: String(item.id),
+  roomName: item.roomName,
+  cinemaId: String(item.cinemaId),
+  // La UI arma sede y sala con estos campos; sin ellos solo puede inventarlas.
+  cinemaName: item.cinema?.name ?? null,
+  cityName: item.cinema?.city?.name ?? null,
+  format: item.format,
+  language: item.language,
+  audioType: item.language,
+  basePrice: Number(item.basePrice),
+  availableSeats: availability?.availableSeats ?? item.capacity,
+  isSoldOut: availability?.isSoldOut ?? false,
+  status: item.status,
+})
+
+const cinemaInclude: IncludeOptions = {
+  model: Cinema,
+  as: 'cinema',
+  include: [{ model: City, as: 'city' }],
+}
 
 const functionsView = async (functions: any[]) => {
   const availability = await availabilityFor(functions)
@@ -28,7 +51,7 @@ catalogRouter.get('/movies/:movieId/functions', async (request, response) => {
     const cinemas = await Cinema.findAll({ where: { cityId: Number(request.query.cityId) }, attributes: ['id'] })
     where.cinemaId = { [Op.in]: cinemas.map((cinema: any) => cinema.id) }
   }
-  const functions = await CinemaFunction.findAll({ where, order: [['startsAt', 'ASC']] })
+  const functions = await CinemaFunction.findAll({ where, include: [cinemaInclude], order: [['startsAt', 'ASC']] })
   return response.json(await functionsView(functions))
 })
 catalogRouter.get('/movies/:movieId', async (request, response) => {
@@ -39,7 +62,7 @@ catalogRouter.get('/movies/:movieId', async (request, response) => {
 catalogRouter.get('/movies/:movieId/recommendations', async (_request, response) => response.json([]))
 
 catalogRouter.get('/functions/:functionId', async (request, response) => {
-  const item: any = await CinemaFunction.findByPk(Number(request.params.functionId))
+  const item: any = await CinemaFunction.findByPk(Number(request.params.functionId), { include: [cinemaInclude] })
   if (!item || item.status !== 'ACTIVE' || new Date(item.startsAt) <= new Date()) return response.status(404).json({ message: 'Funcion no disponible' })
   const availability = await availabilityFor([item])
   return response.json(functionView(item, availability.get(Number(item.id))))

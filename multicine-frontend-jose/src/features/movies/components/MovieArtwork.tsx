@@ -4,10 +4,17 @@ import { cn } from '@/utils/cn'
 import type { MoviePalette } from '@/features/movies/types/movies.types'
 
 interface MovieArtworkProps {
-  palette: MoviePalette
+  /** La API no envía paleta: sin este respaldo la tarjeta cae al desestructurar. */
+  palette?: MoviePalette
   image?: string
   variant?: 'poster' | 'backdrop'
   className?: string
+}
+
+const DEFAULT_PALETTE: MoviePalette = {
+  from: '#2b1b2e',
+  to: '#0f1626',
+  glow: '#C24366',
 }
 
 function MovieArtwork({
@@ -25,7 +32,7 @@ function MovieArtwork({
 
   const [imageFailed, setImageFailed] = useState(false)
   const showImage = Boolean(image) && !imageFailed
-  const { from, to, glow } = palette
+  const { from, to, glow } = palette ?? DEFAULT_PALETTE
   const isBackdrop = variant === 'backdrop'
 
   return (

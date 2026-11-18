@@ -14,101 +14,69 @@ import {
 import { Button } from '@/components/button'
 import { MovieArtwork, moviesApi } from '@/features/movies'
 import type { Movie } from '@/features/movies'
+import type { MovieFunction } from '@/types'
 import { featuredMovies } from '@/features/movies/types/movies.types'
-import { LOCATIONS } from '@/features/landing/data/locations'
 
 import Footer from '../landing/components/Footer'
 import Navbar from '../landing/components/Navbar'
 import MovieDetailSkeleton from './MovieDetailSkeleton'
 
-type LocationOption = {
-  country: string
-  city: string
-  venue: string
+/** Toda la cartelera sale de `/movies/:id/functions`; no hay horarios aleatorios. */
+const FALLBACK_VENUE = 'Sede principal'
+
+const dateKeyOf = (date: Date): string =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+
+const dateKeyOfIso = (iso: string): string => {
+  const date = new Date(iso)
+  return Number.isNaN(date.getTime()) ? '' : dateKeyOf(date)
 }
 
-const getAllLocations = (): LocationOption[] =>
-  Object.entries(LOCATIONS).flatMap(([country, cities]) =>
-    Object.entries(cities).flatMap(([city, venues]) =>
-      venues.map((venue) => ({ country, city, venue })),
-    ),
-  )
+const dateLabelOf = (date: Date): string => {
+  if (dateKeyOf(date) === dateKeyOf(new Date())) {
+    return 'HOY'
+  }
+  return date
+    .toLocaleDateString('es-CO', { weekday: 'short' })
+    .replace('.', '')
+    .toUpperCase()
+    .slice(0, 3)
+}
 
-const getInitialSelectedLocation = (
-  locations: LocationOption[],
-): LocationOption | null => {
+const timeLabelOf = (iso: string): string =>
+  new Date(iso).toLocaleTimeString('es-CO', {
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+
+const venueOf = (item: MovieFunction): string =>
+  item.cinemaName?.trim() || FALLBACK_VENUE
+
+const roomOf = (item: MovieFunction): string =>
+  `${item.format} - ${item.roomName || 'Sala'}`
+
+const getStoredVenue = (): string | null => {
   try {
-    const stored = localStorage.getItem('selectedLocation')
-    if (!stored) {
-      return locations[0] ?? null
-    }
-
-    const parsed = JSON.parse(stored) as {
-      country?: string
-      city?: string
-      venue?: string
-    }
-
-    if (parsed.country && parsed.city && parsed.venue) {
-      const matched = locations.find(
-        (location) =>
-          location.country === parsed.country &&
-          location.city === parsed.city &&
-          location.venue === parsed.venue,
-      )
-
-      if (matched) {
-        return matched
-      }
-    }
-
-    return locations[0] ?? null
+    const raw = localStorage.getItem('selectedLocation')
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as { venue?: string }
+    return typeof parsed.venue === 'string' ? parsed.venue : null
   } catch {
-    return locations[0] ?? null
+    return null
   }
 }
-
-const getDateOptions = () => {
-  const today = new Date()
-
-  return Array.from({ length: 5 }, (_, index) => {
-    const date = new Date(today)
-    date.setDate(today.getDate() + index)
-
-    return {
-      label: ['HOY', 'LUN', 'MAR', 'MIÉ', 'JUE'][index] ?? `D${index + 1}`,
-      day: date.getDate(),
-      value: date.toISOString(),
-    }
-  })
-}
-
-const buildRandomTimes = () => {
-  const times = ['12:00 PM', '2:45 PM', '5:30 PM', '8:15 PM', '10:20 PM']
-  const shuffled = [...times].sort(() => Math.random() - 0.5)
-  return shuffled.slice(0, 5)
-}
-
-const roomTypes = ['3D - DOB', 'Ultra 2D - DOB', '2D - DOB']
 
 const Details = () => {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const location = useLocation()
 
-  const [allLocations] = useState<LocationOption[]>(getAllLocations)
-  const [selectedLocation, setSelectedLocation] =
-    useState<LocationOption | null>(() =>
-      getInitialSelectedLocation(allLocations),
-    )
-  const [selectedDateIndex, setSelectedDateIndex] = useState<number | null>(
-    null,
-  )
-  const [selectedRoomType, setSelectedRoomType] = useState('')
-  const [selectedTime, setSelectedTime] = useState('')
+  const [storedVenue] = useState<string | null>(getStoredVenue)
+  const [selectedVenue, setSelectedVenue] = useState('')
+  const [selectedDateKey, setSelectedDateKey] = useState<string | null>(null)
+  const [selectedRoom, setSelectedRoom] = useState('')
+  const [selectedFunctionId, setSelectedFunctionId] = useState('')
   const [confirmed, setConfirmed] = useState(false)
-
-  const dateOptions = useMemo(() => getDateOptions(), [])
 
   const handleBack = () => {
     if (location.key !== 'default') {
@@ -153,51 +121,111 @@ const Details = () => {
     retry: 1,
   })
 
-  useEffect(() => {
-    if (!selectedLocation) {
-      return
-    }
+  const { data: functions = [], isLoading: functionsLoading } = useQuery<
+    MovieFunction[],
+    Error
+  >({
+    queryKey: ['movie-functions', id, selectedDateKey],
+    queryFn: () => moviesApi.getFunctionsByMovie(id as string),
+    enabled: !!id,
+    staleTime: 60 * 1000,
+    retry: 1,
+  })
 
+  useEffect(() => {
+    if (!selectedVenue) return
     localStorage.setItem(
       'selectedLocation',
-      JSON.stringify({
-        country: selectedLocation.country,
-        city: selectedLocation.city,
-        venue: selectedLocation.venue,
-      }),
+      JSON.stringify({ venue: selectedVenue }),
     )
-  }, [selectedLocation])
+  }, [selectedVenue])
 
-  const locationOptionsForSelection = useMemo(() => {
-    if (!selectedLocation) {
-      return allLocations
+  const venues = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const item of functions) {
+      const name = venueOf(item)
+      if (!map.has(name)) map.set(name, item.cityName?.trim() || '')
     }
+    return [...map].map(([name, city]) => ({ name, city }))
+  }, [functions])
 
-    return allLocations.filter(
-      (location) => location.city === selectedLocation.city,
-    )
-  }, [allLocations, selectedLocation])
+  const dateOptions = useMemo(() => {
+    const seen = new Set<string>()
+    const options: { key: string; label: string; day: number }[] = []
+    for (const item of functions) {
+      const date = new Date(item.startsAt)
+      if (Number.isNaN(date.getTime())) continue
+      const key = dateKeyOf(date)
+      if (seen.has(key)) continue
+      seen.add(key)
+      options.push({ key, label: dateLabelOf(date), day: date.getDate() })
+    }
+    return options.slice(0, 5)
+  }, [functions])
 
-  const scheduleByVenue = useMemo<
-    Record<string, Record<string, string[]>>
-  >(() => {
-    const schedule: Record<string, Record<string, string[]>> = {}
-
-    allLocations.forEach((location) => {
-      schedule[location.venue] = {}
-      roomTypes.forEach((roomType) => {
-        schedule[location.venue][roomType] = buildRandomTimes()
-      })
+  useEffect(() => {
+    if (venues.length === 0) return
+    const preferred = venues.find((venue) => venue.name === storedVenue)
+    setSelectedVenue((current) => {
+      if (venues.some((venue) => venue.name === current)) return current
+      return preferred?.name ?? venues[0].name
     })
+  }, [venues, storedVenue])
 
-    return schedule
-  }, [allLocations])
+  useEffect(() => {
+    if (dateOptions.length === 0) return
+    setSelectedDateKey((current) =>
+      dateOptions.some((date) => date.key === current)
+        ? current
+        : dateOptions[0].key,
+    )
+  }, [dateOptions])
+
+  const roomOptions = useMemo(() => {
+    const rooms = new Set<string>()
+    for (const item of functions) {
+      if (venueOf(item) !== selectedVenue) continue
+      if (!selectedDateKey || dateKeyOfIso(item.startsAt) !== selectedDateKey)
+        continue
+      rooms.add(roomOf(item))
+    }
+    return [...rooms]
+  }, [functions, selectedVenue, selectedDateKey])
+
+  const functionOptions = useMemo(
+    () =>
+      functions.filter(
+        (item) =>
+          venueOf(item) === selectedVenue &&
+          dateKeyOfIso(item.startsAt) === selectedDateKey &&
+          roomOf(item) === selectedRoom,
+      ),
+    [functions, selectedVenue, selectedDateKey, selectedRoom],
+  )
+
+  useEffect(() => {
+    if (roomOptions.length === 0) {
+      if (selectedRoom) setSelectedRoom('')
+      return
+    }
+    if (!roomOptions.includes(selectedRoom)) setSelectedRoom(roomOptions[0])
+  }, [roomOptions, selectedRoom])
+
+  useEffect(() => {
+    if (!selectedRoom) {
+      if (selectedFunctionId) setSelectedFunctionId('')
+      return
+    }
+    if (!functionOptions.some((item) => item.id === selectedFunctionId)) {
+      setSelectedFunctionId('')
+    }
+  }, [functionOptions, selectedRoom, selectedFunctionId])
 
   const isSelectionComplete =
-    !!selectedLocation &&
-    selectedDateIndex !== null &&
-    !!selectedRoomType &&
-    !!selectedTime
+    !!selectedVenue &&
+    !!selectedDateKey &&
+    !!selectedRoom &&
+    !!selectedFunctionId
 
   const scrollToShowtimes = () => {
     document.getElementById('showtimes-section')?.scrollIntoView({
@@ -478,13 +506,13 @@ const Details = () => {
               <div className="absolute left-[12.5%] right-[12.5%] top-1/2 h-[2px] -translate-y-1/2 bg-[#e0d0d5]" />
               <div
                 className={`absolute left-[12.5%] top-1/2 h-[2px] -translate-y-1/2 bg-[#C24366] transition-all duration-300 ${
-                  selectedTime
+                  selectedFunctionId
                     ? 'w-[75%]'
-                    : selectedRoomType
+                    : selectedRoom
                       ? 'w-[50%]'
-                      : selectedDateIndex !== null
+                      : selectedDateKey
                         ? 'w-[25%]'
-                        : selectedLocation
+                        : selectedVenue
                           ? 'w-[12.5%]'
                           : 'w-0'
                 }`}
@@ -493,20 +521,20 @@ const Details = () => {
               <div className="relative z-10 grid grid-cols-4 gap-2">
                 {[1, 2, 3, 4].map((step) => {
                   const isCompleted =
-                    (step === 1 && !!selectedLocation) ||
-                    (step === 2 && selectedDateIndex !== null) ||
-                    (step === 3 && !!selectedRoomType) ||
-                    (step === 4 && !!selectedTime)
+                    (step === 1 && !!selectedVenue) ||
+                    (step === 2 && selectedDateKey !== null) ||
+                    (step === 3 && !!selectedRoom) ||
+                    (step === 4 && !!selectedFunctionId)
 
                   const isCurrent =
-                    (step === 1 && !selectedLocation) ||
+                    (step === 1 && !selectedVenue) ||
                     (step === 2 &&
-                      !!selectedLocation &&
-                      selectedDateIndex === null) ||
+                      !!selectedVenue &&
+                      selectedDateKey === null) ||
                     (step === 3 &&
-                      selectedDateIndex !== null &&
-                      !selectedRoomType) ||
-                    (step === 4 && !!selectedRoomType && !selectedTime)
+                      selectedDateKey !== null &&
+                      !selectedRoom) ||
+                    (step === 4 && !!selectedRoom && !selectedFunctionId)
 
                   return (
                     <div key={step} className="flex justify-center">
@@ -547,35 +575,24 @@ const Details = () => {
                 <span className="sr-only">Sede</span>
                 <div className="relative">
                   <select
-                    value={
-                      selectedLocation
-                        ? `${selectedLocation.city} - ${selectedLocation.venue}`
-                        : ''
-                    }
-                    onChange={(event) => {
-                      const nextValue = event.target.value
-                      const nextLocation = locationOptionsForSelection.find(
-                        (location) =>
-                          `${location.city} - ${location.venue}` === nextValue,
-                      )
-
-                      if (nextLocation) {
-                        setSelectedLocation(nextLocation)
-                        setSelectedTime('')
-                      }
-                    }}
-                    className="w-full appearance-none rounded-xl border border-[#eadfe1] bg-[#f7f4f4] px-3 py-3 pr-10 text-sm font-medium text-[#2d1d20] outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+                    value={selectedVenue}
+                    disabled={venues.length === 0}
+                    onChange={(event) => setSelectedVenue(event.target.value)}
+                    className="w-full appearance-none rounded-xl border border-[#eadfe1] bg-[#f7f4f4] px-3 py-3 pr-10 text-sm font-medium text-[#2d1d20] outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     <option value="" className="bg-white text-[#2d1d20]">
-                      Selecciona una sede
+                      {venues.length === 0
+                        ? 'Sin sedes con funciones'
+                        : 'Selecciona una sede'}
                     </option>
-                    {locationOptionsForSelection.map((location) => (
+                    {venues.map((venue) => (
                       <option
-                        key={`${location.city}-${location.venue}`}
-                        value={`${location.city} - ${location.venue}`}
+                        key={venue.name}
+                        value={venue.name}
                         className="bg-white text-[#2d1d20]"
                       >
-                        {location.city} · {location.venue}
+                        {venue.city ? `${venue.city} · ` : ''}
+                        {venue.name}
                       </option>
                     ))}
                   </select>
@@ -606,25 +623,31 @@ const Details = () => {
                 Elegir la fecha
               </p>
 
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-5 lg:grid-cols-3 xl:grid-cols-5">
-                {dateOptions.map((date, index) => (
-                  <button
-                    key={`${date.value}-${index}`}
-                    type="button"
-                    onClick={() => setSelectedDateIndex(index)}
-                    className={`rounded-xl border px-2 py-2 text-center transition-all ${
-                      selectedDateIndex === index
-                        ? 'border-[#800021] bg-linear-to-r from-[#800021] to-[#C24366] text-white shadow-md shadow-[#C24366]/20'
-                        : 'border-[#eadfe1] bg-[#f9f5f5] text-[#2d1d20] hover:border-[#C24366]/50 hover:text-[#800021]'
-                    }`}
-                  >
-                    <div className="text-[10px] font-bold uppercase tracking-[0.14em]">
-                      {date.label}
-                    </div>
-                    <div className="mt-1 text-sm font-bold">{date.day}</div>
-                  </button>
-                ))}
-              </div>
+              {dateOptions.length > 0 ? (
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-5 lg:grid-cols-3 xl:grid-cols-5">
+                  {dateOptions.map((date) => (
+                    <button
+                      key={date.key}
+                      type="button"
+                      onClick={() => setSelectedDateKey(date.key)}
+                      className={`rounded-xl border px-2 py-2 text-center transition-all ${
+                        selectedDateKey === date.key
+                          ? 'border-[#800021] bg-linear-to-r from-[#800021] to-[#C24366] text-white shadow-md shadow-[#C24366]/20'
+                          : 'border-[#eadfe1] bg-[#f9f5f5] text-[#2d1d20] hover:border-[#C24366]/50 hover:text-[#800021]'
+                      }`}
+                    >
+                      <div className="text-[10px] font-bold uppercase tracking-[0.14em]">
+                        {date.label}
+                      </div>
+                      <div className="mt-1 text-sm font-bold">{date.day}</div>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="rounded-xl border border-dashed border-[#e7d1d7] bg-[#faf7f7] p-3 text-sm text-[#7d5d62]">
+                  Sin fechas disponibles
+                </div>
+              )}
             </div>
 
             <div className="rounded-[22px] border border-[#e8dfe2] bg-white p-4 shadow-sm">
@@ -641,25 +664,28 @@ const Details = () => {
                 Elegir la sala
               </p>
 
-              <div className="space-y-2">
-                {roomTypes.map((roomType) => (
-                  <button
-                    key={roomType}
-                    type="button"
-                    onClick={() => {
-                      setSelectedRoomType(roomType)
-                      setSelectedTime('')
-                    }}
-                    className={`w-full rounded-xl border px-3 py-2 text-left text-sm font-semibold transition-all ${
-                      selectedRoomType === roomType
-                        ? 'border-[#800021] bg-linear-to-r from-[#800021] to-[#C24366] text-white shadow-md shadow-[#C24366]/20'
-                        : 'border-[#eadfe1] bg-[#f9f5f5] text-[#2d1d20] hover:border-[#C24366]/50 hover:text-[#800021]'
-                    }`}
-                  >
-                    {roomType}
-                  </button>
-                ))}
-              </div>
+              {roomOptions.length > 0 ? (
+                <div className="space-y-2">
+                  {roomOptions.map((room) => (
+                    <button
+                      key={room}
+                      type="button"
+                      onClick={() => setSelectedRoom(room)}
+                      className={`w-full rounded-xl border px-3 py-2 text-left text-sm font-semibold transition-all ${
+                        selectedRoom === room
+                          ? 'border-[#800021] bg-linear-to-r from-[#800021] to-[#C24366] text-white shadow-md shadow-[#C24366]/20'
+                          : 'border-[#eadfe1] bg-[#f9f5f5] text-[#2d1d20] hover:border-[#C24366]/50 hover:text-[#800021]'
+                      }`}
+                    >
+                      {room}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="rounded-xl border border-dashed border-[#e7d1d7] bg-[#faf7f7] p-3 text-sm text-[#7d5d62]">
+                  Sin salas para la sede y fecha elegidas
+                </div>
+              )}
             </div>
 
             <div className="rounded-[22px] border border-[#e8dfe2] bg-white p-4 shadow-sm">
@@ -676,30 +702,36 @@ const Details = () => {
                 Elegir el horario
               </p>
 
-              {selectedLocation && selectedRoomType ? (
+              {selectedRoom && functionOptions.length > 0 ? (
                 <div className="flex flex-wrap gap-2">
-                  {(
-                    scheduleByVenue[selectedLocation.venue]?.[
-                      selectedRoomType
-                    ] ?? []
-                  ).map((time) => (
+                  {functionOptions.map((item) => (
                     <button
-                      key={`${selectedLocation.venue}-${selectedRoomType}-${time}`}
+                      key={item.id}
                       type="button"
-                      onClick={() => setSelectedTime(time)}
-                      className={`rounded-xl border px-2.5 py-2 text-sm font-semibold transition-all ${
-                        selectedTime === time
+                      disabled={item.isSoldOut}
+                      onClick={() => setSelectedFunctionId(item.id)}
+                      title={
+                        item.availableSeats !== undefined
+                          ? `${item.availableSeats} asientos disponibles`
+                          : undefined
+                      }
+                      className={`rounded-xl border px-2.5 py-2 text-sm font-semibold transition-all disabled:cursor-not-allowed disabled:opacity-40 ${
+                        selectedFunctionId === item.id
                           ? 'border-[#800021] bg-linear-to-r from-[#800021] to-[#C24366] text-white shadow-md shadow-[#C24366]/20'
                           : 'border-[#eadfe1] bg-[#f9f5f5] text-[#2d1d20] hover:border-[#C24366]/50 hover:text-[#800021]'
                       }`}
                     >
-                      {time}
+                      {timeLabelOf(item.startsAt)}
                     </button>
                   ))}
                 </div>
               ) : (
                 <div className="rounded-xl border border-dashed border-[#e7d1d7] bg-[#faf7f7] p-3 text-sm text-[#7d5d62]">
-                  Elige primero la sede y la sala
+                  {!selectedRoom
+                    ? 'Elige primero la sede, la fecha y la sala'
+                    : functionsLoading
+                      ? 'Cargando funciones...'
+                      : 'No hay funciones disponibles para esta sala'}
                 </div>
               )}
             </div>

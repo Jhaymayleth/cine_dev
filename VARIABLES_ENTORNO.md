@@ -22,7 +22,7 @@
 | `POSTGRES_USER` | No | `multicine` | `multicine` | Usuario. |
 | `POSTGRES_PASSWORD` | No (Sí en producción) | `multicine-local-password` | secreto | Contraseña. |
 | `JWT_EXPIRES_IN` | No | `15m` | `15m` / `7d` | Vida del token. |
-| `CORS_ORIGIN` | No | `http://localhost:5173` | `http://localhost:3000` | Origen permitido. El frontend Next corre en `:3000`/`:8080`; ajustar. |
+| `CORS_ORIGIN` | No | `http://localhost:3001` | `http://localhost:3001` | Origen permitido. En desarrollo el backend usa `:3000` y Next `:3001` (`next dev -p 3001`); en Docker el origen es `:8080`. |
 
 ### Importante para `docker-compose.yml`
 
@@ -32,7 +32,7 @@ El Compose del backend usa `${POSTGRES_DB}`, `${POSTGRES_USER}` y `${POSTGRES_PA
 
 | Variable | ¿Obligatoria? | Por defecto | Ejemplo | Uso |
 |---|---|---|---|---|
-| `NEXT_PUBLIC_API_URL` | **Sí** (build) | Mock de Postman hardcodeado | `http://localhost:3000` | Base de la API (`src/config/api.ts:4`). |
+| `NEXT_PUBLIC_API_URL` | **Sí** (build) | `http://localhost:3000` (antes mock de Postman) | `http://localhost:3000` | Base de la API (`src/config/api.ts:4`). |
 | `NEXT_PUBLIC_API_TIMEOUT` | No | `10000` | `10000` | Timeout en ms (`api.ts:5`). |
 | `NEXT_PUBLIC_APP_NAME` | No | — | `Multicine` | Declarada en `.env.example`; **no se usa en el código actual**. |
 | `NEXT_PUBLIC_APP_ENV` | No | — | `development` | Declarada; **no se usa**. |
@@ -52,7 +52,7 @@ POSTGRES_USER=multicine
 POSTGRES_PASSWORD=cambia-esta-clave
 JWT_SECRET=cambia-esta-clave-por-una-larga-y-aleatoria
 JWT_EXPIRES_IN=15m
-CORS_ORIGIN=http://localhost:3000
+CORS_ORIGIN=http://localhost:3001
 ```
 
 Frontend (`multicine-frontend-jose/.env.local`):
@@ -64,8 +64,8 @@ NEXT_PUBLIC_API_TIMEOUT=10000
 
 ## Notas y trampas conocidas
 
-- El `.env.example` del frontend apunta al **mock de Postman**; para usar el backend real cambia `NEXT_PUBLIC_API_URL`.
+- El frontend apunta al backend local por defecto; define `NEXT_PUBLIC_API_URL` para usar el mock de Postman u otro entorno.
 - El `Dockerfile` del frontend ya usa `output: standalone` y copia `.next/standalone` + `.next/static` (antes copiaba `/app/dist` y el contenedor no arrancaba). Las `NEXT_PUBLIC_*` se pasan como **build args** en `docker-compose.yml` porque se inlinean en build.
 - El backend exige `JWT_SECRET` incluso en desarrollo; sin él no arranca.
-- `CORS_ORIGIN` debe coincidir con el origen real del frontend (por defecto apunta a `:5173`, que no es el puerto de Next).
+- `CORS_ORIGIN` debe coincidir con el origen real del frontend: `:3001` con `npm run dev` y `:8080` con el Compose.
 - No subas `.env` ni `.env.local`; rota `JWT_SECRET` y `POSTGRES_PASSWORD` si se expusieron.
