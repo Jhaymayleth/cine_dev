@@ -113,7 +113,8 @@ export const Payment = sequelize.define('Payment', {
   orderId: { type: DataTypes.INTEGER, allowNull: false },
   amount: { type: DataTypes.DECIMAL(10, 2), allowNull: false },
   method: { type: DataTypes.STRING, allowNull: false },
-  status: { type: DataTypes.STRING, allowNull: false, defaultValue: 'APPROVED' },
+  // Un pago nunca nace aprobado: solo el proveedor (webhook firmado) lo cambia.
+  status: { type: DataTypes.STRING, allowNull: false, defaultValue: 'PENDING' },
   transactionId: { type: DataTypes.STRING, allowNull: false, unique: true },
 }, { tableName: 'payments', timestamps: true })
 

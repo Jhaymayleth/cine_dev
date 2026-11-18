@@ -1,11 +1,17 @@
 import { Op } from 'sequelize'
 import { Router } from 'express'
-import { City, Cinema, CinemaFunction, Country, Movie, Promotion, Seat, SeatLock } from '../models/index.js'
+import { City, Cinema, CinemaFunction, Country, Movie, Promotion, SeatLock } from '../models/index.js'
+import { availabilityFor, seatsWithState } from '../shared/utils/seat-availability.js'
 
 export const catalogRouter = Router()
 
 const movieView = (movie: any) => ({ id: String(movie.id), title: movie.title, description: movie.synopsis, synopsis: movie.synopsis, genres: movie.genres, duration: `${Math.floor(movie.durationMin / 60)}h ${movie.durationMin % 60}min`, durationMin: movie.durationMin, rating: movie.classification, classification: movie.classification, score: movie.rating, posterUrl: movie.posterUrl, image: movie.posterUrl, trailerUrl: movie.trailerUrl, format: '2D', status: movie.status === 'ACTIVE' ? 'Today' : movie.status })
-const functionView = (item: any) => ({ id: String(item.id), movieId: String(item.movieId), startsAt: item.startsAt, roomId: String(item.id), roomName: item.roomName, cinemaId: String(item.cinemaId), format: item.format, language: item.language, audioType: item.language, basePrice: Number(item.basePrice), availableSeats: item.capacity, isSoldOut: false, status: item.status })
+const functionView = (item: any, availability?: { availableSeats: number; isSoldOut: boolean }) => ({ id: String(item.id), movieId: String(item.movieId), startsAt: item.startsAt, roomId: String(item.id), roomName: item.roomName, cinemaId: String(item.cinemaId), format: item.format, language: item.language, audioType: item.language, basePrice: Number(item.basePrice), availableSeats: availability?.availableSeats ?? item.capacity, isSoldOut: availability?.isSoldOut ?? false, status: item.status })
+
+const functionsView = async (functions: any[]) => {
+  const availability = await availabilityFor(functions)
+  return functions.map((item: any) => functionView(item, availability.get(Number(item.id))))
+}
 
 catalogRouter.get('/countries', async (_request, response) => response.json(await Country.findAll({ order: [['name', 'ASC']] })))
 catalogRouter.get('/countries/all_countries', async (_request, response) => response.json(await Country.findAll({ order: [['name', 'ASC']] })))
@@ -23,7 +29,7 @@ catalogRouter.get('/movies/:movieId/functions', async (request, response) => {
     where.cinemaId = { [Op.in]: cinemas.map((cinema: any) => cinema.id) }
   }
   const functions = await CinemaFunction.findAll({ where, order: [['startsAt', 'ASC']] })
-  return response.json(functions.map(functionView))
+  return response.json(await functionsView(functions))
 })
 catalogRouter.get('/movies/:movieId', async (request, response) => {
   const movie = await Movie.findByPk(Number(request.params.movieId))
@@ -35,7 +41,8 @@ catalogRouter.get('/movies/:movieId/recommendations', async (_request, response)
 catalogRouter.get('/functions/:functionId', async (request, response) => {
   const item: any = await CinemaFunction.findByPk(Number(request.params.functionId))
   if (!item || item.status !== 'ACTIVE' || new Date(item.startsAt) <= new Date()) return response.status(404).json({ message: 'Funcion no disponible' })
-  return response.json(functionView(item))
+  const availability = await availabilityFor([item])
+  return response.json(functionView(item, availability.get(Number(item.id))))
 })
 catalogRouter.get('/functions/:functionId/prices', async (request, response) => {
   const item: any = await CinemaFunction.findByPk(Number(request.params.functionId))
@@ -47,7 +54,11 @@ catalogRouter.get('/promotions', async (_request, response) => response.json(awa
 catalogRouter.get('/promotions/active', async (_request, response) => response.json(await Promotion.findAll({ where: { active: true } })))
 catalogRouter.get('/promotions/:id', async (request, response) => response.json(await Promotion.findByPk(Number(request.params.id))))
 
-catalogRouter.get('/seats', async (request, response) => response.json(await Seat.findAll({ where: { functionId: Number(request.query.functionId) }, order: [['row', 'ASC'], ['number', 'ASC']] })))
+catalogRouter.get('/seats', async (request, response) => {
+  const functionId = Number(request.query.functionId)
+  if (!Number.isInteger(functionId) || functionId <= 0) return response.status(400).json({ message: 'functionId es obligatorio' })
+  return response.json(await seatsWithState(functionId))
+})
 catalogRouter.get('/seatLocks', async (request, response) => response.json(await SeatLock.findAll({ where: { functionId: Number(request.query.functionId), expiresAt: { [Op.gt]: new Date() } } })))
 
 async function billboard(cityId?: string) {

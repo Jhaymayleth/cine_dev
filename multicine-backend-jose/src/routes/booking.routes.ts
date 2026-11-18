@@ -14,12 +14,12 @@ import {
 } from '../models/index.js'
 import { sequelize } from '../config/database.js'
 import { asyncHandler } from '../core/http/async-handler.js'
+import { validateBody } from '../core/http/validate.middleware.js'
 import { authMiddleware, type AuthenticatedRequest } from '../middlewares/auth.middleware.js'
+import { seatsWithState } from '../shared/utils/seat-availability.js'
+import { cartSnackSchema, orderSchema, paymentSchema, seatLockSchema, ticketsSchema } from './schemas.js'
 
 export const bookingRouter = Router()
-
-const MAX_TICKETS_PER_ORDER = 10
-const MAX_SNACK_QUANTITY = 50
 
 /** Solo el usuario del token: nunca userId del body/query. */
 const userIdOf = (request: AuthenticatedRequest): number | null => {
@@ -38,6 +38,7 @@ const badRequest = (response: any, message: string) => response.status(400).json
 bookingRouter.post(
   '/seatLocks',
   authMiddleware,
+  validateBody(seatLockSchema),
   asyncHandler(async (request: AuthenticatedRequest, response) => {
     const userId = userIdOf(request)
     if (!userId) return response.status(401).json({ message: 'No autenticado' })
@@ -60,6 +61,13 @@ bookingRouter.post(
       })
       if (existing) return 'locked' as const
 
+      // Un asiento con ticket vendido no se puede volver a bloquear.
+      const sold = await Ticket.findOne({
+        where: { seatId, functionId, status: { [Op.ne]: 'CANCELLED' } },
+        transaction,
+      })
+      if (sold) return 'sold' as const
+
       const lock = await SeatLock.create(
         {
           seatId,
@@ -74,6 +82,7 @@ bookingRouter.post(
 
     if (result === 'not_found') return response.status(404).json({ message: 'Asiento no encontrado' })
     if (result === 'locked') return response.status(409).json({ message: 'El asiento ya esta bloqueado' })
+    if (result === 'sold') return response.status(409).json({ message: 'El asiento ya tiene ticket' })
     return response.status(201).json(result)
   }),
 )
@@ -154,16 +163,15 @@ bookingRouter.get(
 bookingRouter.post(
   '/cartSnacks',
   authMiddleware,
+  validateBody(cartSnackSchema),
   asyncHandler(async (request: AuthenticatedRequest, response) => {
     const userId = userIdOf(request)
     const cartId = positiveId(request.body?.cartId)
     const snackId = positiveId(request.body?.snackId)
-    const quantity = Number(request.body?.quantity ?? 1)
+    // cartId, snackId y quantity ya vienen validados y normalizados por Zod.
+    const quantity = Number(request.body.quantity)
     if (!userId) return response.status(401).json({ message: 'No autenticado' })
     if (!cartId || !snackId) return badRequest(response, 'cartId y snackId son obligatorios')
-    if (!Number.isInteger(quantity) || quantity < 1 || quantity > MAX_SNACK_QUANTITY) {
-      return badRequest(response, `La cantidad debe ser un entero entre 1 y ${MAX_SNACK_QUANTITY}`)
-    }
 
     const [cart, snack] = await Promise.all([
       Cart.findOne({ where: { id: cartId, userId } }),
@@ -206,6 +214,7 @@ bookingRouter.get('/snacks', async (_request, response) =>
 bookingRouter.post(
   '/orders',
   authMiddleware,
+  validateBody(orderSchema),
   asyncHandler(async (request: AuthenticatedRequest, response) => {
     const userId = userIdOf(request)
     if (!userId) return response.status(401).json({ message: 'No autenticado' })
@@ -255,6 +264,7 @@ bookingRouter.get(
 bookingRouter.post(
   '/payments',
   authMiddleware,
+  validateBody(paymentSchema),
   asyncHandler(async (request: AuthenticatedRequest, response) => {
     const userId = userIdOf(request)
     const orderId = positiveId(request.body?.orderId)
@@ -284,15 +294,13 @@ bookingRouter.post(
 bookingRouter.post(
   '/tickets',
   authMiddleware,
+  validateBody(ticketsSchema),
   asyncHandler(async (request: AuthenticatedRequest, response) => {
     const userId = userIdOf(request)
     if (!userId) return response.status(401).json({ message: 'No autenticado' })
 
-    const rawItems = Array.isArray(request.body) ? request.body : [request.body]
-    if (rawItems.length === 0 || rawItems.length > MAX_TICKETS_PER_ORDER) {
-      return badRequest(response, `Se permiten entre 1 y ${MAX_TICKETS_PER_ORDER} tickets`)
-    }
-
+    // El esquema ya normaliza objeto o array a una lista de 1..MAX tickets.
+    const rawItems = request.body as any[]
     const items = rawItems.map((item: any) => ({
       orderId: positiveId(item?.orderId),
       functionId: positiveId(item?.functionId),
@@ -379,11 +387,8 @@ bookingRouter.get(
   }),
 )
 
-bookingRouter.get('/functions/:functionId/seats', async (request, response) =>
-  response.json(
-    await Seat.findAll({
-      where: { functionId: Number(request.params.functionId) },
-      order: [['row', 'ASC'], ['number', 'ASC']],
-    }),
-  ),
-)
+bookingRouter.get('/functions/:functionId/seats', async (request, response) => {
+  const functionId = positiveId(request.params.functionId)
+  if (!functionId) return badRequest(response, 'functionId no es valido')
+  return response.json(await seatsWithState(functionId))
+})
